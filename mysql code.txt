@@ -1,0 +1,631 @@
+-- this code include, data importing, cleaning and exploration using MySQL
+-- the data has been downloaded from Kaggle and includes loan data
+
+-- creating table using varcharr to prevent error during import if the row has blank value
+
+create Table staging_loan_data
+(
+person_age VARCHAR(255),
+person_income VARCHAR(255),
+person_home_ownership VARCHAR(255),
+person_emp_length VARCHAR(255),
+loan_intent VARCHAR(255),
+loan_grade VARCHAR(255),
+loan_amnt VARCHAR(255),
+loan_int_rate VARCHAR(255),
+loan_status VARCHAR(255),
+loan_percent_income VARCHAR(255),
+cb_person_default_on_file VARCHAR(255),
+cb_person_cred_hist_length VARCHAR(255)
+);
+
+create table loan_data (
+    loan_id int auto_increment primary key,
+    person_age INT,
+    person_income DECIMAL(12,2),
+    person_home_ownership VARCHAR(50),
+    person_emp_length DECIMAL(4,1),
+    loan_intent VARCHAR(50),
+    loan_grade VARCHAR(10),
+    loan_amnt DECIMAL(10,2),
+    loan_int_rate DECIMAL(5,2),
+    loan_status INT,
+    loan_percent_income DECIMAL(5,4),
+    cb_person_default_on_file VARCHAR(55),
+    cb_person_cred_hist_length INT
+);
+
+
+
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/credit_risk_dataset1.csv'
+INTO TABLE staging_loan_data
+FIELDS TERMINATED BY ',' 
+ENCLOSED BY '"'
+LINES TERMINATED BY '\r\n'
+IGNORE 1 ROWS;
+
+insert into loan_data
+(
+person_age ,
+person_income,
+person_home_ownership,
+person_emp_length,
+loan_intent,
+loan_grade,
+loan_amnt,
+loan_int_rate,
+loan_status,
+loan_percent_income,
+cb_person_default_on_file,
+cb_person_cred_hist_length)
+SELECT 
+    NULLIF(person_age, ''),
+    NULLIF(person_income, ''),
+    NULLIF(person_home_ownership, ''),
+    NULLIF(person_emp_length, ''),
+    NULLIF(loan_intent, ''),
+    NULLIF(loan_grade, ''),
+    NULLIF(loan_amnt, ''),
+    NULLIF(loan_int_rate, ''),
+    NULLIF(loan_status, ''),
+    NULLIF(loan_percent_income, ''),
+    NULLIF(cb_person_default_on_file, ''),
+    NULLIF(cb_person_cred_hist_length, '')
+from staging_loan_data;
+
+select *
+from loan_data;
+
+select loan_grade, avg(loan_int_rate) as avg_int_rate
+from loan_data
+group by loan_grade order by loan_grade;
+
+with grade_avg as
+(
+select loan_grade, avg(loan_int_rate) as avg_int_rate
+from loan_data
+group by loan_grade order by loan_grade
+)
+
+update loan_data l
+join grade_avg g on l.loan_grade = g.loan_grade
+set l.loan_int_rate = g.avg_int_rate
+where l.loan_int_rate is null;
+
+select loan_int_rate
+from loan_data
+where loan_int_rate is null;
+
+select *
+from loan_data;
+
+alter table loan_data
+modify column person_income int;
+
+alter table loan_data
+modify column loan_amnt int;
+
+select *
+from loan_data
+where person_emp_length > person_age;
+
+UPDATE loan_data
+SET person_emp_length = NULL
+WHERE person_emp_length < 0
+   OR person_emp_length > person_age;
+
+select person_age
+from loan_data
+group by person_age
+order by max(person_age) desc;
+
+DELETE FROM loan_data
+WHERE person_age < 18
+   OR person_age > 100;
+
+select person_age, person_income
+from loan_data
+order by person_income desc;
+
+
+select *
+from loan_data
+order by person_age desc;
+
+select count(*) as total_records, sum(person_emp_length is null) as
+missing_emp_length, round(100 * sum(person_emp_length is null) / count(*)) as missing_percentage
+from loan_data;
+
+SELECT *
+FROM loan_data
+WHERE cb_person_cred_hist_length > person_age - 14;
+
+SELECT
+    person_age,
+    person_income,
+    person_home_ownership,
+    person_emp_length,
+    loan_intent,
+    loan_grade,
+    loan_amnt,
+    loan_int_rate,
+    loan_status,
+    loan_percent_income,
+    cb_person_default_on_file,
+    cb_person_cred_hist_length,
+    COUNT(*) AS duplicate_count
+FROM loan_data
+GROUP BY
+    person_age,
+    person_income,
+    person_home_ownership,
+    person_emp_length,
+    loan_intent,
+    loan_grade,
+    loan_amnt,
+    loan_int_rate,
+    loan_status,
+    loan_percent_income,
+    cb_person_default_on_file,
+    cb_person_cred_hist_length
+HAVING COUNT(*) > 1
+ORDER BY duplicate_count DESC;
+
+
+WITH duplicate_rows AS (
+    SELECT
+        *,
+        COUNT(*) OVER (
+            PARTITION BY
+                person_age,
+                person_income,
+                person_home_ownership,
+                person_emp_length,
+                loan_intent,
+                loan_grade,
+                loan_amnt,
+                loan_int_rate,
+                loan_status,
+                loan_percent_income,
+                cb_person_default_on_file,
+                cb_person_cred_hist_length
+        ) AS duplicate_count
+    FROM loan_data
+)
+SELECT COUNT(*) AS total_rows_in_duplicate_groups
+FROM duplicate_rows
+WHERE duplicate_count > 1;
+
+WITH ranked_rows AS (
+    SELECT
+        loan_id,
+        ROW_NUMBER() OVER (
+            PARTITION BY
+                person_age,
+                person_income,
+                person_home_ownership,
+                person_emp_length,
+                loan_intent,
+                loan_grade,
+                loan_amnt,
+                loan_int_rate,
+                loan_status,
+                loan_percent_income,
+                cb_person_default_on_file,
+                cb_person_cred_hist_length
+            ORDER BY loan_id
+        ) AS row_numbers
+    FROM loan_data
+)
+SELECT COUNT(*) AS rows_to_remove
+FROM ranked_rows
+WHERE row_numbers > 1;
+
+CREATE TABLE loan_data_backup AS
+SELECT *
+FROM loan_data;
+
+DELETE FROM loan_data
+WHERE loan_id IN (
+    SELECT loan_id
+    FROM (
+        SELECT
+            loan_id,
+            ROW_NUMBER() OVER (
+                PARTITION BY
+                    person_age,
+                    person_income,
+                    person_home_ownership,
+                    person_emp_length,
+                    loan_intent,
+                    loan_grade,
+                    loan_amnt,
+                    loan_int_rate,
+                    loan_status,
+                    loan_percent_income,
+                    cb_person_default_on_file,
+                    cb_person_cred_hist_length
+                ORDER BY loan_id
+            ) AS row_num
+        FROM loan_data
+    ) AS ranked
+    WHERE row_num > 1
+);
+
+select *
+from loan_data;
+
+SELECT
+    SUM(person_age IS NULL) AS age_nulls,
+    SUM(person_income IS NULL) AS income_nulls,
+    SUM(person_emp_length IS NULL) AS employment_nulls,
+    SUM(loan_amnt IS NULL) AS amount_nulls,
+    SUM(loan_int_rate IS NULL) AS interest_nulls,
+    SUM(loan_status IS NULL) AS status_nulls
+FROM loan_data;
+
+SELECT *
+FROM loan_data
+WHERE person_age NOT BETWEEN 18 AND 100
+   OR person_income <= 0
+   OR loan_amnt <= 0
+   OR loan_int_rate < 0
+   OR loan_status NOT IN (0, 1)
+   OR loan_percent_income < 0;
+   
+   
+   -- start exploratory and analysis
+	-- total portfolio overview 
+   select 
+   count(*) as total_loans, loan_intent, person_home_ownership, loan_grade, cb_person_default_on_file,
+   sum(loan_status = 1) as defaulted_loans,
+   sum(loan_status = 0) as non_defaulted_loans,
+   round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+   round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+   from loan_data
+   group by 
+   loan_intent,
+   person_home_ownership,
+   loan_grade, cb_person_default_on_file;
+   
+   
+   
+   -- default by  loan purpose
+   select
+   loan_intent,
+   count(*) as number_of_loans,
+   sum(loan_status =1) as defaulted_loans,
+   sum(loan_status = 0) as non_defaulted_loans,
+   round(avg(loan_amnt)) as avg_loan_size,
+   round(sum(loan_status = 1) / count(*) *100) as default_percentage
+	from loan_data
+   group by loan_intent
+   order by round(sum(loan_status = 1) / count(*) *100) desc;
+   
+
+   
+   select
+   loan_grade,
+   count(*) as number_of_loans, 
+   sum(if(loan_status = 1, loan_amnt, 0)) defaulted_loan_value,
+   sum(loan_amnt) as total_exposure,
+   sum(loan_status =1) as defaulted_loans,
+   sum(loan_status = 0) as non_defaulted_loans,
+   round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+   round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+   from loan_data
+   group by loan_grade
+   order by sum(loan_amnt) desc, round(sum(loan_status = 1) / count(*) *100) desc ;
+   
+   select min(loan_percent_income), max(loan_percent_income)
+   from loan_data;
+   
+   select Case
+   When loan_percent_income < 0.10 then "Less than 10%"
+   When loan_percent_income between 0.10 and 0.30 then "Between 10 to 30 percent"
+   When loan_percent_income between 0.30 and 0.50 then "Between 30 to 50 percent"
+   When loan_percent_income between 0.50 and 0.80 then "Between 50 to 80 percent"
+   else "Over 80 Percent"
+   end as loan_to_income_ratio,
+   count(*) as total_loans,
+   sum(loan_status =1) as defaulted_loans, sum(loan_status=1) / count(*) *100 as defaul_percentage
+   from loan_data
+   group by Case
+   When loan_percent_income < 0.10 then "Less than 10%"
+   When loan_percent_income between 0.10 and 0.30 then "Between 10 to 30 percent"
+   When loan_percent_income between 0.30 and 0.50 then "Between 30 to 50 percent"
+   When loan_percent_income between 0.50 and 0.80 then "Between 50 to 80 percent"
+   else "Over 80 Percent"
+   end
+   Order by loan_to_income_ratio;
+   
+   select Case
+   when loan_amnt <5000 then "Less than 5000"
+   when loan_amnt between 5000 and 15000 then "Between 5000 and 15000"
+   when loan_amnt between 15000 and 25000 then "Between 15000 and 25000"
+   when loan_amnt between 25000 and 35000 then "Between 25000 and 35000"
+	end as loan_size,
+   count(*) as total_loans, sum(loan_status =1) as defaulted_loans, 
+   sum(loan_status =1) / count(*) *100 as defaulted_percentage
+   from loan_data
+   group by 
+   Case
+   when loan_amnt <5000 then "Less than 5000"
+   when loan_amnt between 5000 and 15000 then "Between 5000 and 15000"
+   when loan_amnt between 15000 and 25000 then "Between 15000 and 25000"
+   when loan_amnt between 25000 and 35000 then "Between 25000 and 35000"
+   end
+    order by loan_size desc;
+    
+    
+   
+   
+   -- default by person_age
+   SELECT
+    CASE
+        WHEN person_age < 25 THEN 'Under 25'
+        WHEN person_age BETWEEN 25 AND 50 THEN 'Between 25 and 50'
+        WHEN person_age BETWEEN 50 AND 70 THEN 'Between 50 and 70'
+        WHEN person_age > 70 THEN 'Over 70'
+    END AS age_group,
+
+Count(*) as number_of_loans,
+sum(loan_status =1) as defaulted_loans,
+sum(loan_status = 0) as non_defaulted_loans,
+round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+
+FROM loan_data
+GROUP BY
+	
+    CASE
+        WHEN person_age < 25 THEN 'Under 25'
+        WHEN person_age BETWEEN 25 AND 50 THEN 'Between 25 and 50'
+        WHEN person_age BETWEEN 50 AND 70 THEN 'Between 50 and 70'
+        WHEN person_age > 70 THEN 'Over 70'
+    END
+
+ORDER BY
+    MIN(person_age);
+    
+-- defaults as per income
+
+select 
+case
+When person_income between 0 and 30000 then '0 to 30k'
+when person_income between 30000 and 60000 then '30k to 60k'
+when person_income between 60000 and 100000 then '60k to 100k'
+else 'over 100k'
+end as Income_group,
+
+count(*) as number_of_loans,
+   sum(loan_status =1) as defaulted_loans,
+   sum(loan_status = 0) as non_defaulted_loans,
+   round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+   round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+   
+from loan_data
+group by 
+case 
+When person_income between 0 and 30000 then '0 to 30k'
+when person_income between 30000 and 60000 then '30k to 60k'
+when person_income between 60000 and 100000 then '60k to 100k'
+else 'over 100k'
+end
+order by round(sum(loan_status = 1) / count(*) *100) desc;
+
+-- as per interest rate
+Select 
+case 
+when loan_int_rate <8 then 'less than 8%'
+when loan_int_rate <12 then 'less than 12%'
+when loan_int_rate <20 then 'less than 20%'
+else '20% or more'
+end as interest_rate_range,
+
+count(*) as number_of_loans,
+   sum(loan_status =1) as defaulted_loans,
+   sum(loan_status = 0) as non_defaulted_loans,
+   round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+   round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+   
+from loan_data
+group by
+
+case 
+when loan_int_rate <8 then 'less than 8%'
+when loan_int_rate <12 then 'less than 12%'
+when loan_int_rate <20 then 'less than 20%'
+else '20% or more'
+end
+order by min(loan_int_rate);
+
+
+-- defaults as per employment length
+
+select 
+	case
+		when person_emp_length is null then 'Unknown'
+        when person_emp_length < 1 then 'under 1 year'
+        when person_emp_length < 3 then '1 to 3 years'
+        when person_emp_length < 6 then '3 to 6 years'
+        when person_emp_length < 11 then '6 to 10 years'
+        else 'over 10 years'
+        end as employment_history,
+	
+	count(*) as number_of_loans,
+	sum(loan_status =1) as defaulted_loans,
+	sum(loan_status = 0) as non_defaulted_loans,
+	round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+	round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+    
+    from loan_data
+    group by
+    case
+		when person_emp_length is null then 'Unknown'
+        when person_emp_length < 1 then 'under 1 year'
+        when person_emp_length < 3 then '1 to 3 years'
+        when person_emp_length < 6 then '3 to 6 years'
+        when person_emp_length < 11 then '6 to 10 years'
+        else 'over 10 years'
+	end
+    order by min(person_emp_length);
+        
+-- default by home ownership
+
+select
+   person_home_ownership,
+   count(*) as number_of_loans,
+   sum(loan_status =1) as defaulted_loans,
+   sum(loan_status = 0) as non_defaulted_loans,
+   round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+   round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+   from loan_data
+   group by person_home_ownership
+   order by round(sum(loan_status = 1) / count(*) *100) desc;
+   
+
+-- default by default history
+
+select
+   cb_person_default_on_file,
+   count(*) as number_of_loans,
+   sum(loan_status =1) as defaulted_loans,
+   sum(loan_status = 0) as non_defaulted_loans,
+   round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+   round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+   from loan_data
+   group by cb_person_default_on_file
+   order by round(sum(loan_status = 1) / count(*) *100) desc;
+   
+   -- default as per length of credit history
+     
+   select min(cb_person_cred_hist_length), max(cb_person_cred_hist_length)
+   from loan_data;
+   
+   select 
+	case
+		when cb_person_cred_hist_length <5 then 'Less than 5 years'
+        when cb_person_cred_hist_length <15 then '5 to 15 years'
+		when cb_person_cred_hist_length <20 then '15 to 20 years'
+        else 'over 20 years'
+        end as credit_history,
+        
+   count(*) as number_of_loans,
+   sum(loan_status =1) as defaulted_loans,
+   sum(loan_status = 0) as non_defaulted_loans,
+   round(sum(loan_status = 1) / count(*) *100) as default_percentage,
+   round(sum(loan_status = 0) / count(*) *100) as non_default_percentage
+   from loan_data
+   
+   group by
+   case
+		when cb_person_cred_hist_length <5 then 'Less than 5 years'
+        when cb_person_cred_hist_length <15 then '5 to 15 years'
+		when cb_person_cred_hist_length <20 then '15 to 20 years'
+        else 'over 20 years'
+        end
+        
+	order by min(cb_person_cred_hist_length);
+        
+        
+
+   
+   
+
+
+
+select min(loan_int_rate), max(loan_int_rate)
+from loan_data;
+
+ -- default by group indicators 1
+SELECT
+    loan_grade,
+    cb_person_default_on_file,
+    person_home_ownership,
+    COUNT(*) AS number_of_loans,
+    SUM(loan_status = 1) AS defaulted_loans,
+    ROUND(SUM(loan_status = 1) / COUNT(*) * 100, 2)
+        AS default_percentage
+
+FROM loan_data
+GROUP BY
+    loan_grade,
+    cb_person_default_on_file,
+    person_home_ownership
+
+HAVING COUNT(*) >= 20
+ORDER BY default_percentage DESC
+LIMIT 20;
+
+-- calculate loss of revenue based on highest risk combinations
+
+SELECT
+    loan_grade,
+    cb_person_default_on_file,
+    person_home_ownership,
+    COUNT(*) AS number_of_loans,
+    round(
+		sum(case
+        when loan_status = 1 then loan_amnt 
+        else 0
+        end)
+        ) as defaulted_loan_value,
+    
+    SUM(loan_status = 1) AS defaulted_loans,
+    ROUND(SUM(loan_status = 1) / COUNT(*) * 100, 2)
+        AS default_percentage
+
+FROM loan_data
+GROUP BY
+    loan_grade,
+    cb_person_default_on_file,
+    person_home_ownership
+
+HAVING COUNT(*) >= 20
+ORDER BY defaulted_loan_value DESC
+LIMIT 20;
+
+
+SELECT
+    loan_grade,
+
+    SUM(
+        CASE
+		WHEN loan_status = 1 THEN loan_amnt
+		ELSE 0
+        END
+    ) AS total_defaulted_loan_value,
+
+    ROUND(
+        SUM(
+            CASE
+			WHEN loan_status = 1 THEN loan_amnt
+			ELSE 0
+            END
+        )
+        /
+        SUM(
+            SUM(
+                CASE
+                    WHEN loan_status = 1 THEN loan_amnt
+                    ELSE 0
+                END
+            )
+        ) OVER () * 100,
+        2
+    ) AS share_of_total_defaulted_value
+
+FROM loan_data
+GROUP BY loan_grade
+ORDER BY total_defaulted_loan_value DESC;
+
+   
+
+
+   
+   
+   
+   
+   
+
